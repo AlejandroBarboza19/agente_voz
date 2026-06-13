@@ -61,16 +61,16 @@ class TTSService:
             use_speaker_boost=use_speaker_boost,
         )
 
-        # generate() retorna un generador de bytes; lo concatenamos
+        # generate() retorna un async generator directamente
         audio_generator = self.client.text_to_speech.convert(
             voice_id=target_voice,
             text=text,
             model_id=self.model_id,
             voice_settings=voice_settings,
-            output_format="mp3_44100_128",  # MP3, 44.1 kHz, 128 kbps
+            output_format="mp3_44100_128",
         )
 
-        audio_bytes = b"".join([chunk async for chunk in await audio_generator])
+        audio_bytes = b"".join([chunk async for chunk in audio_generator])
 
         logger.info("tts_complete", bytes_generated=len(audio_bytes))
         return audio_bytes
