@@ -45,12 +45,16 @@ services:
       - .env
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
+      - HF_HOME=/app/.cache/huggingface
     depends_on:
       ollama:
         condition: service_healthy
     volumes:
       - ./app:/app/app
+      - whisper_models:/app/.cache/huggingface
 
 volumes:
   ollama_data:
     name: voice-agent-ollama-data
+  whisper_models:
+    name: voice-agent-whisper-models

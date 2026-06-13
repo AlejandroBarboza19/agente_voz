@@ -16,6 +16,9 @@ httpx==0.27.2
 # ElevenLabs
 elevenlabs==1.13.0
 
+# STT - faster-whisper (local, gratuito, reemplaza Amazon Transcribe)
+faster-whisper==1.1.1
+
 # Audio processing
 pydub==0.25.1
 
