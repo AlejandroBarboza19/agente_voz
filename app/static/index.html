@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agente de Voz IA</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 32px;
+      padding: 24px;
+    }
+
+    h1 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.5px; }
+    p.subtitle { color: #888; font-size: 0.9rem; }
+
+    /* Botón principal */
+    #btn {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      border: 3px solid #444;
+      background: #1a1a1a;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: #888;
+      transition: all 0.2s;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #btn svg { width: 40px; height: 40px; fill: #666; transition: fill 0.2s; }
+    #btn:hover { border-color: #666; }
+
+    #btn.recording {
+      border-color: #e53e3e;
+      background: #2d1a1a;
+      animation: pulse 1s infinite;
+      color: #e53e3e;
+    }
+    #btn.recording svg { fill: #e53e3e; }
+
+    #btn.thinking {
+      border-color: #3182ce;
+      background: #1a2233;
+      color: #63b3ed;
+    }
+    #btn.thinking svg { fill: #63b3ed; }
+
+    #btn.speaking {
+      border-color: #38a169;
+      background: #1a2d20;
+      color: #68d391;
+    }
+    #btn.speaking svg { fill: #68d391; }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(229,62,62,0.4); }
+      50%       { box-shadow: 0 0 0 16px rgba(229,62,62,0); }
+    }
+
+    /* Hint de teclado */
+    .hint {
+      font-size: 0.78rem;
+      color: #555;
+      text-align: center;
+    }
+    .key {
+      display: inline-block;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-family: monospace;
+      color: #aaa;
+    }
+
+    /* Transcript + respuesta */
+    #log {
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 340px;
+      overflow-y: auto;
+    }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      max-width: 90%;
+    }
+    .bubble.user {
+      background: #1e2a3a;
+      border: 1px solid #2d4a6a;
+      align-self: flex-end;
+      color: #90cdf4;
+    }
+    .bubble.assistant {
+      background: #1a2d1e;
+      border: 1px solid #2d5a36;
+      align-self: flex-start;
+      color: #9ae6b4;
+    }
+    .bubble .label {
+      font-size: 0.72rem;
+      opacity: 0.6;
+      margin-bottom: 4px;
+    }
+
+    /* Status */
+    #status {
+      font-size: 0.85rem;
+      color: #666;
+      min-height: 20px;
+    }
+
+    /* Session ID */
+    #session-info {
+      font-size: 0.72rem;
+      color: #444;
+    }
+
+    /* Error */
+    .error-msg {
+      color: #fc8181;
+      font-size: 0.82rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div style="text-align:center">
+    <h1>🎙️ Agente de Voz IA</h1>
+    <p class="subtitle">Powered by Ollama + ElevenLabs</p>
+  </div>
+
+  <button id="btn" title="Mantén pulsado para hablar">
+    <!-- Micrófono SVG -->
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-6 9a6 6 0 0 0 12 0h2a8 8 0 0 1-7 7.93V20h3v2H8v-2h3v-2.07A8 8 0 0 1 4 10h2z"/>
+    </svg>
+    <span id="btn-label">Mantén pulsado</span>
+  </button>
+
+  <p class="hint">
+    Click y mantén el botón <strong>o</strong> mantén <span class="key">Espacio</span>
+  </p>
+
+  <p id="status">Listo</p>
+
+  <div id="log"></div>
+
+  <p id="session-info"></p>
+
+  <audio id="audio-player" style="display:none"></audio>
+
+<script>
+  // ── Configuración ──────────────────────────────────────
+  const API_BASE = window.location.origin; // misma URL donde está servido
+  const SESSION_ID = 'session-' + Math.random().toString(36).slice(2, 10);
+
+  document.getElementById('session-info').textContent = `Sesión: ${SESSION_ID}`;
+
+  // ── Estado ─────────────────────────────────────────────
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let isRecording = false;
+  let stream = null;
+
+  const btn = document.getElementById('btn');
+  const btnLabel = document.getElementById('btn-label');
+  const statusEl = document.getElementById('status');
+  const log = document.getElementById('log');
+  const audioPlayer = document.getElementById('audio-player');
+
+  // ── Funciones de UI ────────────────────────────────────
+  function setStatus(text, state = 'idle') {
+    statusEl.textContent = text;
+    btn.className = state === 'recording' ? 'recording'
+                  : state === 'thinking'  ? 'thinking'
+                  : state === 'speaking'  ? 'speaking'
+                  : '';
+    btnLabel.textContent = state === 'recording' ? 'Suelta para enviar'
+                         : state === 'thinking'  ? 'Procesando...'
+                         : state === 'speaking'  ? 'Reproduciendo...'
+                         : 'Mantén pulsado';
+  }
+
+  function addBubble(role, text) {
+    const div = document.createElement('div');
+    div.className = `bubble ${role}`;
+    div.innerHTML = `<div class="label">${role === 'user' ? '🎤 Tú' : '🤖 Agente'}</div>${text}`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function showError(msg) {
+    const div = document.createElement('p');
+    div.className = 'error-msg';
+    div.textContent = '⚠️ ' + msg;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ── Grabación ──────────────────────────────────────────
+  async function startRecording() {
+    if (isRecording) return;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = sendAudio;
+      mediaRecorder.start();
+      isRecording = true;
+      setStatus('Grabando...', 'recording');
+    } catch (err) {
+      showError('No se pudo acceder al micrófono: ' + err.message);
+    }
+  }
+
+  function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    mediaRecorder.stop();
+    stream.getTracks().forEach(t => t.stop());
+    isRecording = false;
+    setStatus('Enviando...', 'thinking');
+  }
+
+  // ── Envío a la API ─────────────────────────────────────
+  async function sendAudio() {
+    if (audioChunks.length === 0) {
+      setStatus('Listo');
+      return;
+    }
+
+    const blob = new Blob(audioChunks, { type: 'audio/webm' });
+    const formData = new FormData();
+    formData.append('audio', blob, 'recording.webm');
+    formData.append('session_id', SESSION_ID);
+
+    setStatus('Procesando con IA...', 'thinking');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/voice/chat`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || res.statusText);
+      }
+
+      const transcript = res.headers.get('X-Transcript') || '...';
+      const responseText = res.headers.get('X-Response-Text') || '...';
+
+      addBubble('user', transcript);
+      addBubble('assistant', responseText);
+
+      // Reproducir audio de respuesta
+      const audioBlob = await res.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      audioPlayer.src = audioUrl;
+      setStatus('Reproduciendo respuesta...', 'speaking');
+      audioPlayer.play();
+      audioPlayer.onended = () => {
+        setStatus('Listo');
+        URL.revokeObjectURL(audioUrl);
+      };
+
+    } catch (err) {
+      showError(err.message);
+      setStatus('Error — intenta de nuevo');
+    }
+  }
+
+  // ── Eventos del botón (click/touch) ───────────────────
+  btn.addEventListener('mousedown', e => { e.preventDefault(); startRecording(); });
+  btn.addEventListener('mouseup', stopRecording);
+  btn.addEventListener('mouseleave', () => { if (isRecording) stopRecording(); });
+
+  btn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); });
+  btn.addEventListener('touchend', stopRecording);
+
+  // ── Eventos de teclado (Espacio) ──────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && !e.repeat) {
+      e.preventDefault();
+      startRecording();
+    }
+  });
+  document.addEventListener('keyup', e => {
+    if (e.code === 'Space') stopRecording();
+  });
+</script>
+</body>
+</html>

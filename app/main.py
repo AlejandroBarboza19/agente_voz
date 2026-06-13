@@ -7,6 +7,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 
 from app.config import get_settings
 from app.routers import voice, text
@@ -70,6 +73,12 @@ app.include_router(voice.router)
 app.include_router(text.router)
 
 
+# Static files (frontend)
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
 @app.get("/health", tags=["system"])
 async def health_check():
     """Health check del servicio y sus dependencias."""
@@ -91,6 +100,9 @@ async def health_check():
 
 @app.get("/", tags=["system"])
 async def root():
+    static_index = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    if os.path.exists(static_index):
+        return FileResponse(static_index)
     return {
         "message": "Voice AI Agent API",
         "docs": "/docs",
