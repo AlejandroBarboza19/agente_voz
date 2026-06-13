@@ -30,8 +30,10 @@ ENV PATH=/app/packages/bin:$PATH
 # Copiar código fuente
 COPY app/ ./app/
 
-# Usuario no-root para seguridad
-RUN useradd --no-create-home --no-log-init appuser && chown -R appuser /app
+# Crear directorio de cache con permisos correctos
+RUN mkdir -p /app/.cache/huggingface && \
+    useradd --no-create-home --no-log-init appuser && \
+    chown -R appuser /app
 USER appuser
 
 EXPOSE 8000
