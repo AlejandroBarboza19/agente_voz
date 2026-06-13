@@ -46,15 +46,37 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - HF_HOME=/app/.cache/huggingface
+      - POSTGRES_DSN=postgresql://postgres:postgres@db:5432/agente_voz
     depends_on:
       ollama:
+        condition: service_healthy
+      db:
         condition: service_healthy
     volumes:
       - ./app:/app/app
       - whisper_models:/app/.cache/huggingface
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: voice-agent-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agente_voz
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   ollama_data:
     name: voice-agent-ollama-data
   whisper_models:
     name: voice-agent-whisper-models
+  postgres_data:
+    name: voice-agent-postgres-data

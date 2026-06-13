@@ -22,6 +22,9 @@ faster-whisper==1.1.1
 # Audio processing
 pydub==0.25.1
 
+# PostgreSQL
+psycopg2-binary==2.9.10
+
 # Utilities
 python-dotenv==1.0.1
 structlog==24.4.0

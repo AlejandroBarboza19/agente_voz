@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     dynamodb_table_name: str = "voice_agent_sessions"
     dynamodb_session_ttl_hours: int = 24
 
+    # PostgreSQL
+    postgres_dsn: str = "postgresql://postgres:postgres@db:5432/agente_voz"
+
     # Lambda
     lambda_cleanup_function: str = "voice-agent-session-cleanup"
 

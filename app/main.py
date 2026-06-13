@@ -15,6 +15,8 @@ from app.config import get_settings
 from app.routers import voice, text
 from app.services.llm import LLMService
 from app.services.dynamodb import DynamoDBService
+from app.services.database import init_db
+from app.routers.appointments import router as appointments_router
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -24,6 +26,12 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Startup y shutdown de la aplicación."""
     logger.info("app_startup", env=settings.app_env, model=settings.ollama_model)
+
+    # Inicializar PostgreSQL
+    try:
+        init_db()
+    except Exception as e:
+        logger.warning("postgres_init_warning", error=str(e))
 
     # Crear tabla DynamoDB si no existe (útil en primera ejecución)
     try:
@@ -71,6 +79,7 @@ app.add_middleware(
 # Routers
 app.include_router(voice.router)
 app.include_router(text.router)
+app.include_router(appointments_router)
 
 
 # Static files (frontend)
