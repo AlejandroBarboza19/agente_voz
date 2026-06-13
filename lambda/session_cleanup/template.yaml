@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Voice Agent - Session Cleanup Lambda
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 256
+    Runtime: python3.12
+
+Parameters:
+  TableName:
+    Type: String
+    Default: voice_agent_sessions
+  MaxSessionAgeHours:
+    Type: Number
+    Default: 48
+
+Resources:
+  SessionCleanupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: voice-agent-session-cleanup
+      Handler: handler.handler
+      CodeUri: ./
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref TableName
+          MAX_SESSION_AGE_HOURS: !Ref MaxSessionAgeHours
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TableName
+      Events:
+        # Ejecutar cada hora
+        ScheduledCleanup:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+            Name: voice-agent-hourly-cleanup
+            Description: Limpieza horaria de sesiones expiradas
+            Enabled: true
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt SessionCleanupFunction.Arn
