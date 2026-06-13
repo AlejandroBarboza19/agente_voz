@@ -100,16 +100,20 @@ class LLMService:
     async def check_health(self) -> bool:
         """Verifica que Ollama esté disponible y el modelo cargado."""
         try:
-            models = await self.client.list()
-            available = [m["name"] for m in models.get("models", [])]
+            response = await self.client.list()
+            # La respuesta es un objeto ListResponse con atributo .models
+            models_list = response.models if hasattr(response, "models") else response.get("models", [])
+            # Cada modelo puede ser objeto o dict
+            available = []
+            for m in models_list:
+                name = getattr(m, "model", None) or getattr(m, "name", None) or (m.get("model") or m.get("name") if isinstance(m, dict) else None)
+                if name:
+                    available.append(name)
+
             logger.info("ollama_models_available", models=available)
 
             if not any(self.model in m for m in available):
-                logger.warning(
-                    "model_not_found",
-                    model=self.model,
-                    available=available,
-                )
+                logger.warning("model_not_found", model=self.model, available=available)
                 return False
             return True
         except Exception as e:
