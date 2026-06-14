@@ -1,0 +1,296 @@
+================================================================================
+                        AGENTE DE VOZ IA — DOCUMENTACIÓN
+================================================================================
+
+Autor   : Alejandro Barboza
+Versión : 1.0.0
+URL     : https://agentevoz.duckdns.org
+
+
+--------------------------------------------------------------------------------
+1. DESCRIPCIÓN GENERAL
+--------------------------------------------------------------------------------
+
+El Agente de Voz IA es un asistente conversacional que permite al usuario
+hablar por micrófono y recibir respuestas en audio de forma natural.
+
+El sistema convierte la voz del usuario en texto, procesa el mensaje con un
+modelo de lenguaje local, genera una respuesta en texto y la convierte
+nuevamente en audio que se reproduce en el navegador.
+
+Todo el procesamiento de IA ocurre en el propio servidor (VPS), sin depender
+de servicios de IA de pago excepto la síntesis de voz.
+
+
+--------------------------------------------------------------------------------
+2. FLUJO DE UNA CONVERSACIÓN
+--------------------------------------------------------------------------------
+
+  [Usuario habla]
+        │
+        ▼
+  [Navegador graba audio WebM via MediaRecorder API]
+        │
+        ▼
+  [Audio enviado por HTTP multipart a POST /api/v1/voice/chat]
+        │
+        ▼
+  [faster-whisper convierte audio → texto  (STT, local)]
+        │
+        ▼
+  [Se carga el historial de conversación desde DynamoDB]
+        │
+        ▼
+  [Ollama (llama3.2:1b) genera respuesta en texto  (LLM, local)]
+        │
+        ▼
+  [Historial actualizado se guarda en DynamoDB]
+        │
+        ▼
+  [ElevenLabs convierte respuesta → audio MP3  (TTS, cloud)]
+        │
+        ▼
+  [Navegador recibe MP3 y lo reproduce automáticamente]
+        │
+        ▼
+  [Transcripción y respuesta aparecen como burbujas en la UI]
+
+
+--------------------------------------------------------------------------------
+3. SERVICIOS Y TECNOLOGÍAS
+--------------------------------------------------------------------------------
+
+  CAPA           TECNOLOGÍA              DESCRIPCIÓN
+  ─────────────────────────────────────────────────────────────────────────────
+  API            FastAPI (Python)        Backend principal. Gestiona los
+                                         endpoints, coordina los servicios y
+                                         devuelve las respuestas.
+
+  STT            faster-whisper          Speech-to-Text local y gratuito.
+                 (Whisper small)         Convierte el audio del usuario en
+                                         texto. Modelo: small (~460 MB).
+                                         Corre en CPU dentro del contenedor.
+
+  LLM            Ollama + llama3.2:1b    Modelo de lenguaje local y gratuito.
+                                         Genera las respuestas del agente.
+                                         Corre en CPU. Modelo: 1.2B parámetros
+                                         (~1.3 GB). Contexto: 131,072 tokens.
+
+  TTS            ElevenLabs API          Text-to-Speech en la nube.
+                                         Convierte el texto de respuesta en
+                                         audio MP3 de alta calidad.
+                                         Requiere API Key (plan gratuito
+                                         limitado a voces propias).
+
+  Historial      Amazon DynamoDB         Base de datos NoSQL en AWS.
+                                         Almacena el historial de mensajes
+                                         por sesión con TTL de 24 horas.
+                                         Expiración automática activada.
+
+  Servidor       VPS Linux (Ubuntu)      Toda la IA corre en el VPS propio.
+                 + Docker Compose        Tres contenedores: API, Ollama, y
+                                         modelo-init (descarga automática).
+
+  SSL/HTTPS      Nginx + Let's Encrypt   Proxy inverso con certificado SSL
+                                         gratuito. Renovación automática.
+                                         Necesario para acceder al micrófono
+                                         desde el navegador.
+
+  Frontend       HTML + JS puro          Interfaz web minimalista sin
+                                         frameworks. Graba audio con la
+                                         Web MediaRecorder API. Compatible
+                                         con móvil y escritorio.
+
+
+--------------------------------------------------------------------------------
+4. ARQUITECTURA DE CONTENEDORES
+--------------------------------------------------------------------------------
+
+  docker-compose.yml define tres servicios:
+
+  voice-agent-ollama
+    Imagen   : ollama/ollama:latest
+    Puerto   : 11434 (interno)
+    Volumen  : voice-agent-ollama-data (modelos persistentes)
+    Función  : Servidor LLM. Sirve el modelo llama3.2:1b por HTTP.
+
+  voice-agent-model-init
+    Imagen   : ollama/ollama:latest
+    Función  : Se ejecuta una sola vez al iniciar. Descarga el modelo
+               llama3.2:1b si no está en el volumen. Luego se detiene.
+
+  voice-agent-api
+    Imagen   : agente_voz-api (build local)
+    Puerto   : 8001 → 8000 (interno)
+    Volumen  : whisper_models (modelos Whisper persistentes)
+    Función  : API FastAPI. Contiene STT, lógica de negocio y conexión
+               a DynamoDB y ElevenLabs.
+
+  Sistema Nginx (host)
+    No es un contenedor. Corre en el sistema operativo del VPS.
+    Actúa como proxy inverso: recibe en :443 (HTTPS) y redirige a :8001.
+    Certificado SSL gestionado por certbot + Let's Encrypt.
+
+
+--------------------------------------------------------------------------------
+5. ESTRUCTURA DEL PROYECTO
+--------------------------------------------------------------------------------
+
+  agente_voz/
+  ├── app/
+  │   ├── main.py                  Entrypoint FastAPI. Registra routers,
+  │   │                            inicializa DB y descarga modelos al arrancar.
+  │   ├── config.py                Variables de entorno con pydantic-settings.
+  │   ├── models/
+  │   │   └── chat.py              Modelos Pydantic: Message, Request, Response.
+  │   ├── routers/
+  │   │   ├── voice.py             POST /api/v1/voice/chat
+  │   │   │                        POST /api/v1/voice/transcribe
+  │   │   ├── text.py              POST /api/v1/text/chat
+  │   │   │                        GET/DELETE /api/v1/sessions/{id}
+  │   │   └── appointments.py      CRUD de citas (REST).
+  │   ├── services/
+  │   │   ├── transcribe.py        faster-whisper STT.
+  │   │   ├── llm.py               Cliente Ollama con function calling.
+  │   │   ├── tts.py               Cliente ElevenLabs TTS.
+  │   │   ├── dynamodb.py          Historial de sesiones en DynamoDB.
+  │   │   ├── database.py          PostgreSQL: citas y clientes.
+  │   │   └── tools.py             Definición de tools para function calling.
+  │   ├── utils/
+  │   │   └── audio.py             Detección de formato, conversión WAV,
+  │   │                            validación de tamaño.
+  │   └── static/
+  │       └── index.html           Frontend web del agente.
+  ├── lambda/
+  │   └── session_cleanup/         AWS Lambda para limpiar sesiones antiguas.
+  │       ├── handler.py
+  │       └── template.yaml        SAM template para despliegue.
+  ├── nginx/
+  │   └── nginx.conf               Config Nginx para contenedor (referencia).
+  ├── scripts/
+  │   └── setup_aws.py             Crea bucket S3 y tabla DynamoDB en AWS.
+  ├── Dockerfile                   Multi-stage build (builder + runtime).
+  ├── docker-compose.yml           Orquestación de contenedores.
+  ├── requirements.txt             Dependencias Python.
+  └── .env                         Variables de entorno (no subir a git).
+
+
+--------------------------------------------------------------------------------
+6. ENDPOINTS DE LA API
+--------------------------------------------------------------------------------
+
+  POST   /api/v1/voice/chat
+         Endpoint principal. Recibe audio (multipart), devuelve audio MP3.
+         Headers de respuesta incluyen X-Transcript y X-Response-Text.
+         Parámetros: audio (file), session_id (form), language_code (form).
+
+  POST   /api/v1/voice/transcribe
+         Solo transcripción. Devuelve JSON con el texto y confianza.
+
+  POST   /api/v1/text/chat
+         Chat en texto. Útil para pruebas sin micrófono.
+         Body: { session_id, message }
+
+  POST   /api/v1/text/chat/stream
+         Igual que el anterior pero con streaming SSE.
+
+  GET    /api/v1/sessions/{session_id}
+         Devuelve el historial completo de mensajes de una sesión.
+
+  DELETE /api/v1/sessions/{session_id}
+         Elimina una sesión de DynamoDB.
+
+  GET    /health
+         Estado del servicio. Verifica conectividad con Ollama.
+
+  GET    /docs
+         Documentación interactiva Swagger UI.
+
+
+--------------------------------------------------------------------------------
+7. VARIABLES DE ENTORNO (.env)
+--------------------------------------------------------------------------------
+
+  Variable                  Descripción
+  ─────────────────────────────────────────────────────────────────────────────
+  OLLAMA_BASE_URL           URL del servidor Ollama (http://ollama:11434)
+  OLLAMA_MODEL              Modelo a usar (llama3.2:1b)
+  ELEVENLABS_API_KEY        API Key de ElevenLabs
+  ELEVENLABS_VOICE_ID       ID de la voz a usar (debe ser voz propia en plan free)
+  ELEVENLABS_MODEL_ID       Modelo TTS (eleven_multilingual_v2)
+  AWS_ACCESS_KEY_ID         Credencial AWS para DynamoDB
+  AWS_SECRET_ACCESS_KEY     Credencial AWS para DynamoDB
+  AWS_REGION                Región AWS (us-east-1)
+  DYNAMODB_TABLE_NAME       Nombre de la tabla (voice_agent_sessions)
+  DYNAMODB_SESSION_TTL_HOURS  Horas de vida de una sesión (24)
+  POSTGRES_DSN              Cadena de conexión PostgreSQL
+
+
+--------------------------------------------------------------------------------
+8. GESTIÓN DE SESIONES
+--------------------------------------------------------------------------------
+
+  Cada conversación tiene un session_id único generado en el frontend.
+  El historial se almacena en DynamoDB como lista de mensajes
+  (role: user/assistant, content: texto).
+
+  Al recibir un mensaje nuevo:
+    1. Se carga el historial existente de DynamoDB.
+    2. Se pasa al LLM como contexto junto al mensaje nuevo.
+    3. La respuesta del LLM y el mensaje del usuario se añaden al historial.
+    4. El historial actualizado se guarda de vuelta en DynamoDB.
+
+  Las sesiones expiran automáticamente a las 24 horas gracias al TTL
+  configurado en DynamoDB. Una Lambda adicional realiza limpieza forzada
+  cada hora para sesiones que superen las 48 horas.
+
+
+--------------------------------------------------------------------------------
+9. INFRAESTRUCTURA AWS UTILIZADA
+--------------------------------------------------------------------------------
+
+  Servicio         Uso en el proyecto
+  ─────────────────────────────────────────────────────────────────────────────
+  DynamoDB         Historial de conversaciones por sesión.
+                   Tabla: voice_agent_sessions
+                   Clave: session_id (String)
+                   TTL: atributo "ttl" (Unix timestamp)
+
+  S3               Bucket creado pero no en uso activo.
+                   Originalmente para Amazon Transcribe (reemplazado
+                   por faster-whisper local).
+
+  Lambda           Función voice-agent-session-cleanup.
+                   Limpia sesiones antiguas cada hora via EventBridge.
+
+  IAM              Usuario con permisos:
+                   AmazonDynamoDBFullAccess
+                   AmazonS3FullAccess
+                   AmazonTranscribeFullAccess (no activo)
+
+
+--------------------------------------------------------------------------------
+10. COMANDOS DE OPERACIÓN
+--------------------------------------------------------------------------------
+
+  Ver logs en tiempo real:
+    docker logs voice-agent-api -f
+    docker logs voice-agent-ollama -f
+
+  Reiniciar API:
+    docker compose restart api
+
+  Actualizar código desde GitHub:
+    git pull && docker compose up -d --build api
+
+  Ver estado de contenedores:
+    docker compose ps
+
+  Health check:
+    curl https://agentevoz.duckdns.org/health
+
+  Ver sesión en DynamoDB via API:
+    curl https://agentevoz.duckdns.org/api/v1/sessions/SESSION_ID
+
+
+================================================================================

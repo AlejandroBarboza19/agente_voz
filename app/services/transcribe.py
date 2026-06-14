@@ -18,7 +18,7 @@ from app.config import get_settings
 logger = structlog.get_logger()
 settings = get_settings()
 
-WHISPER_MODEL_SIZE = "small"   # ~460 MB, buen balance calidad/velocidad
+WHISPER_MODEL_SIZE = "tiny"    # ~150 MB, más ligero para VPS con poca RAM
 WHISPER_DEVICE = "cpu"         # "cuda" si hay GPU
 WHISPER_COMPUTE = "int8"       # int8 = más rápido en CPU
 
