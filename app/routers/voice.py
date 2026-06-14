@@ -119,13 +119,17 @@ async def voice_chat(
     log.info("tts_done", audio_bytes=len(audio_response))
 
     # --- 5. Responder con audio + metadata en headers ---
+    # Sanitizar valores para headers HTTP (solo ASCII imprimible)
+    def safe_header(text: str) -> str:
+        return text.encode("ascii", errors="ignore").decode("ascii")[:200]
+
     return Response(
         content=audio_response,
         media_type="audio/mpeg",
         headers={
             "X-Session-ID": session_id,
-            "X-Transcript": transcript[:200],
-            "X-Response-Text": response_text[:200],
+            "X-Transcript": safe_header(transcript),
+            "X-Response-Text": safe_header(response_text),
             "X-Tokens-Used": str(tokens),
             "Content-Disposition": f'attachment; filename="response_{session_id}.mp3"',
         },
