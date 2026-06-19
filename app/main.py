@@ -1,5 +1,6 @@
 """
 Entrypoint de la aplicación FastAPI.
+Optimizado por Alejandro Barboza: Conexión en la nube + SQL Agent de LangChain.
 """
 
 import structlog
@@ -15,8 +16,7 @@ from app.config import get_settings
 from app.routers import voice, text
 from app.services.llm import LLMService
 from app.services.dynamodb import DynamoDBService
-from app.services.database import init_db
-from app.routers.appointments import router as appointments_router
+# 🚨 Eliminamos el import de app.services.database ya que no usamos psycopg2 manual
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -25,15 +25,9 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup y shutdown de la aplicación."""
-    logger.info("app_startup", env=settings.app_env, model=settings.ollama_model)
+    logger.info("app_startup", env=settings.app_env)
 
-    # Inicializar PostgreSQL
-    try:
-        init_db()
-    except Exception as e:
-        logger.warning("postgres_init_warning", error=str(e))
-
-    # Crear tabla DynamoDB si no existe (útil en primera ejecución)
+    # 1. Crear tabla DynamoDB si no existe (Historial de sesiones en AWS)
     try:
         DynamoDBService.create_table_if_not_exists(
             region=settings.aws_region,
@@ -42,12 +36,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("dynamodb_setup_warning", error=str(e))
 
-    # Descargar modelo Ollama si no está disponible
-    try:
-        llm = LLMService()
-        await llm.pull_model_if_needed()
-    except Exception as e:
-        logger.warning("ollama_pull_warning", error=str(e))
+    # 🚨 Quitamos los bloques de init_db() y llm.pull_model_if_needed() 
+    # ya que las tablas las manejas desde pgAdmin y el LLM corre por API en OpenRouter.
 
     logger.info("app_ready")
     yield
@@ -58,8 +48,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Voice AI Agent",
     description=(
-        "Agente de IA de voz con FastAPI + Ollama + ElevenLabs + "
-        "Amazon Transcribe + DynamoDB"
+        "Agente de IA de voz híbrido con FastAPI + LangChain SQL Agent + ElevenLabs + "
+        "Whisper Cloud + DynamoDB + S3"
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -67,10 +57,10 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS
+# CORS (Mantenemos tu configuración abierta para desarrollo)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Ajustar en producción
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -79,8 +69,8 @@ app.add_middleware(
 # Routers
 app.include_router(voice.router)
 app.include_router(text.router)
-app.include_router(appointments_router)
-
+# Nota: Si dejas appointments_router, asegúrate de que use SQLAlchemy o puedes quitarlo si solo el agente manejará las citas
+# app.include_router(appointments_router)
 
 # Static files (frontend)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -90,17 +80,17 @@ if os.path.exists(static_dir):
 
 @app.get("/health", tags=["system"])
 async def health_check():
-    """Health check del servicio y sus dependencias."""
+    """Health check del servicio adaptado a APIs en la nube."""
     llm = LLMService()
-    ollama_ok = await llm.check_health()
+    # Ahora verificamos la salud del servicio mapeado con la API Key externa
+    api_ok = await llm.check_health()
 
     return JSONResponse(
-        status_code=200 if ollama_ok else 503,
+        status_code=200 if api_ok else 503,
         content={
-            "status": "healthy" if ollama_ok else "degraded",
+            "status": "healthy" if api_ok else "degraded",
             "services": {
-                "ollama": "ok" if ollama_ok else "unavailable",
-                "model": settings.ollama_model,
+                "openrouter_api": "ok" if api_ok else "unavailable"
             },
             "version": "1.0.0",
         },
@@ -113,7 +103,7 @@ async def root():
     if os.path.exists(static_index):
         return FileResponse(static_index)
     return {
-        "message": "Voice AI Agent API",
+        "message": "Voice AI Agent API con SQL Agent Listo",
         "docs": "/docs",
         "health": "/health",
     }

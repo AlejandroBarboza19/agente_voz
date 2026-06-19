@@ -6,23 +6,23 @@ pydantic-settings==2.6.1
 aiofiles==24.1.0
 
 # AWS
-boto3==1.35.81
-botocore==1.35.81
+boto3==1.34.81
+botocore==1.34.81
 
-# Ollama
-ollama==0.4.4
-httpx==0.27.2
+# IA: LangChain, OpenRouter & Whisper Cloud
+openai==1.58.1
+langchain-core==0.3.27
+langchain-community==0.3.11
+langchain-openai==0.2.14
+SQLAlchemy==2.0.36
 
 # ElevenLabs
 elevenlabs==1.13.0
 
-# STT - faster-whisper (local, gratuito, reemplaza Amazon Transcribe)
-faster-whisper==1.1.1
-
 # Audio processing
 pydub==0.25.1
 
-# PostgreSQL
+# PostgreSQL (Usamos binary para Docker)
 psycopg2-binary==2.9.10
 
 # Utilities

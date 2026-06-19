@@ -29,6 +29,10 @@ def detect_format(audio_bytes: bytes) -> str:
     Detecta el formato del audio por sus magic bytes.
     Retorna una extensión en minúsculas.
     """
+    if len(audio_bytes) < 4:
+        logger.warning("audio_too_short", bytes_len=len(audio_bytes))
+        return "wav"
+    
     if audio_bytes[:4] == b"RIFF":
         return "wav"
     if audio_bytes[:3] == b"ID3" or audio_bytes[:2] == b"\xff\xfb":
@@ -39,20 +43,23 @@ def detect_format(audio_bytes: bytes) -> str:
         return "ogg"
     if audio_bytes[:4] in (b"\x1a\x45\xdf\xa3",):
         return "webm"
-    # Default: asumir wav
-    logger.warning("unknown_audio_format_magic_bytes", fallback="wav")
-    return "wav"
+    if audio_bytes[:8] == b"\xff\xfb\x90\x00" or audio_bytes[:2] == b"\xff\xfa":
+        return "mp3"
+    
+    # Si no detectamos, asumir WebM (formato común del navegador)
+    logger.warning("unknown_audio_format_magic_bytes", fallback="webm", first_bytes=audio_bytes[:4].hex())
+    return "webm"
 
 
 def convert_to_wav(audio_bytes: bytes, source_format: str) -> bytes:
     """
-    Convierte audio a WAV mono 16kHz (óptimo para Amazon Transcribe).
+    Convierte audio a WAV mono 16kHz (óptimo para Whisper).
     """
     try:
         segment = AudioSegment.from_file(
             io.BytesIO(audio_bytes), format=source_format
         )
-        # Amazon Transcribe funciona mejor con mono 16kHz
+        # Whisper funciona mejor con mono 16kHz
         segment = segment.set_channels(1).set_frame_rate(16000)
 
         output = io.BytesIO()

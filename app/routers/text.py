@@ -1,8 +1,6 @@
 """
-Router de endpoints de texto:
-  POST /api/v1/text/chat        — Texto → LLM → Texto
-  GET  /api/v1/sessions/{id}    — Historial de sesión
-  DELETE /api/v1/sessions/{id}  — Eliminar sesión
+Router de endpoints de texto adaptado para Alejandro Barboza.
+Conecta los chats de texto planos y de streaming al nuevo SQL Agent de LangChain.
 """
 
 import uuid
@@ -43,25 +41,27 @@ async def text_chat(
     db: DynamoDBService = Depends(get_db),
 ):
     """
-    Chat de texto con historial de conversación persistido en DynamoDB.
-    Útil para pruebas sin voz o integraciones programáticas.
+    Chat de texto bloqueante adaptado al Agente SQL.
+    Consume el generador asíncrono acumulando la respuesta antes de retornar.
     """
     log = logger.bind(session_id=request.session_id)
     log.info("text_chat_request", message=request.message[:80])
 
-    # Historial previo
+    # Historial previo desde DynamoDB
     history = await db.get_session(request.session_id)
 
-    # Generar respuesta
+    # 🔥 CORRECCIÓN CLAVE: Acumulamos el generador asíncrono porque 'llm.chat' ya no existe 🔥
     try:
-        response_text, tokens = await llm.chat(
-            user_message=request.message, history=history
-        )
+        response_chunks = []
+        async for chunk in llm.chat_stream(user_message=request.message, history=history):
+            response_chunks.append(chunk)
+        
+        response_text = "".join(response_chunks)
     except Exception as e:
         log.error("llm_error", error=str(e))
-        raise HTTPException(status_code=502, detail=f"Error al generar respuesta: {e}")
+        raise HTTPException(status_code=502, detail=f"Error al generar respuesta del agente: {e}")
 
-    # Persistir mensajes
+    # Persistir mensajes en DynamoDB usando tu formato oficial
     await db.append_messages(
         request.session_id,
         [
@@ -74,7 +74,7 @@ async def text_chat(
         session_id=request.session_id,
         message=request.message,
         response=response_text,
-        tokens_used=tokens,
+        tokens_used=0,  # Ponemos 0 ya que el agente de LangChain oculta el conteo crudo de tokens de OpenRouter
     )
 
 
@@ -88,26 +88,30 @@ async def text_chat_stream(
     db: DynamoDBService = Depends(get_db),
 ):
     """
-    Igual que /text/chat pero retorna la respuesta en streaming (SSE).
-    Útil para mostrar texto en tiempo real en UIs.
+    Igual que /text/chat pero retorna la respuesta en streaming (SSE) directo desde Gemini.
     """
     history = await db.get_session(request.session_id)
     full_response = []
 
     async def event_generator():
-        async for chunk in llm.chat_stream(request.message, history=history):
-            full_response.append(chunk)
-            yield f"data: {chunk}\n\n"
+        try:
+            async for chunk in llm.chat_stream(request.message, history=history):
+                full_response.append(chunk)
+                yield f"data: {chunk}\n\n"
+        except Exception as e:
+            logger.error("stream_error", error=str(e))
+            yield f"data: Error en el flujo: {str(e)}\n\n"
 
-        # Al terminar, persistir
+        # Al terminar el ciclo, guardamos la transcripción completa en tu DynamoDB
         complete_text = "".join(full_response)
-        await db.append_messages(
-            request.session_id,
-            [
-                Message(role=Role.user, content=request.message),
-                Message(role=Role.assistant, content=complete_text),
-            ],
-        )
+        if complete_text:
+            await db.append_messages(
+                request.session_id,
+                [
+                    Message(role=Role.user, content=request.message),
+                    Message(role=Role.assistant, content=complete_text),
+                ],
+            )
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -122,6 +126,7 @@ async def get_session(
     session_id: str,
     db: DynamoDBService = Depends(get_db),
 ):
+    """Mantiene intacta tu lógica de consultas a DynamoDB"""
     messages = await db.get_session(session_id)
     if not messages:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
@@ -142,6 +147,7 @@ async def delete_session(
     session_id: str,
     db: DynamoDBService = Depends(get_db),
 ):
+    """Mantiene intacto el borrado de sesiones"""
     deleted = await db.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Sesión no encontrada o error al eliminar")
